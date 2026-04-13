@@ -196,7 +196,7 @@ local rotateCode = [=[
 
 function ConstantArray:addRotateCode(ast, shift)
 	local parser = Parser:new({
-		LuaVersion = LuaVersion.Lua51;
+		LuaVersion = self.luaVersion or LuaVersion.Lua51;
 	});
 
 	local newAst = parser:parse(string.gsub(string.gsub(rotateCode, "SHIFT", tostring(shift)), "LEN", tostring(#self.constants)));
@@ -268,7 +268,7 @@ function ConstantArray:addDecodeCode(ast)
 ]];
 
 		local parser = Parser:new({
-			LuaVersion = LuaVersion.Lua51;
+			LuaVersion = self.luaVersion or LuaVersion.Lua51;
 		});
 
 		local newAst = parser:parse(base64DecodeCode);
@@ -357,7 +357,7 @@ function ConstantArray:addDecodeCode(ast)
 ]];
 
 		local parser = Parser:new({
-			LuaVersion = LuaVersion.Lua51;
+			LuaVersion = self.luaVersion or LuaVersion.Lua51;
 		});
 
 		local newAst = parser:parse(base85DecodeCode);
@@ -482,7 +482,7 @@ function ConstantArray:addDecodeCode(ast)
 ]];
 
 		local parser = Parser:new({
-			LuaVersion = LuaVersion.Lua51;
+			LuaVersion = self.luaVersion or LuaVersion.Lua51;
 		});
 
 		local newAst = parser:parse(mixedDecodeCode);
@@ -617,6 +617,7 @@ function ConstantArray:encode(str)
 end
 
 function ConstantArray:apply(ast, pipeline)
+	self.luaVersion = (pipeline and pipeline.LuaVersion) or LuaVersion.Lua51;
 	initPrefixes();
 	self.rootScope = ast.body.scope;
 	self.arrId = self.rootScope:addVariable();

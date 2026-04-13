@@ -16,6 +16,36 @@ local NameGenerators = require("prometheus.namegenerators");
 local Steps = require("prometheus.steps");
 local LuaVersion = Enums.LuaVersion;
 
+local CompatibilityProfiles = {
+	["Lua51"] = {
+		LuaVersion = LuaVersion.Lua51,
+		FeatureFlags = {
+			AllowContinueStatement = false,
+			AllowCompoundAssignment = false,
+			AllowIfElseExpression = false,
+			AllowTypedSyntax = false,
+		},
+	},
+	["LuaU-safe"] = {
+		LuaVersion = LuaVersion.LuaU,
+		FeatureFlags = {
+			AllowContinueStatement = true,
+			AllowCompoundAssignment = true,
+			AllowIfElseExpression = false,
+			AllowTypedSyntax = false,
+		},
+	},
+	["LuaU-typed"] = {
+		LuaVersion = LuaVersion.LuaU,
+		FeatureFlags = {
+			AllowContinueStatement = true,
+			AllowCompoundAssignment = true,
+			AllowIfElseExpression = false,
+			AllowTypedSyntax = true,
+		},
+	},
+};
+
 -- On Windows, os.clock can be used. On other systems, os.time must be used for benchmarking.
 local isWindows = package and package.config and type(package.config) == "string" and package.config:sub(1,1) == "\\";
 local function gettime()
@@ -29,17 +59,30 @@ end
 local Pipeline = {
 	NameGenerators = NameGenerators;
 	Steps = Steps;
+	CompatibilityProfiles = CompatibilityProfiles;
 	DefaultSettings = {
-		LuaVersion = LuaVersion.LuaU; -- The Lua Version to use for the Tokenizer, Parser and Unparser
+		LuaVersion = LuaVersion.Lua51; -- The Lua Version to use for the Tokenizer, Parser and Unparser
+		CompatibilityProfile = "Lua51";
 		PrettyPrint = false; -- Note that Pretty Print is currently not producing Pretty results
 		Seed = 0; -- The Seed. 0 or below uses the current time as a seed
 		VarNamePrefix = ""; -- The Prefix that every variable will start with
 	}
 }
 
+local function resolveCompatibilityProfile(settings)
+	local profileName = settings.CompatibilityProfile or settings.compatibilityProfile or Pipeline.DefaultSettings.CompatibilityProfile;
+	local profile = CompatibilityProfiles[profileName];
+	if profile then
+		return profileName, profile;
+	end
+	return nil, nil;
+end
+
 
 function Pipeline:new(settings)
-	local luaVersion = settings.luaVersion or settings.LuaVersion or Pipeline.DefaultSettings.LuaVersion;
+	settings = settings or {};
+	local profileName, profile = resolveCompatibilityProfile(settings);
+	local luaVersion = settings.luaVersion or settings.LuaVersion or (profile and profile.LuaVersion) or Pipeline.DefaultSettings.LuaVersion;
 	local conventions = Enums.Conventions[luaVersion];
 	if(not conventions) then
 		logger:error("The Lua Version \"" .. luaVersion
@@ -52,11 +95,14 @@ function Pipeline:new(settings)
 
 	local pipeline = {
 		LuaVersion = luaVersion;
+		CompatibilityProfile = profileName;
+		FeatureFlags = profile and profile.FeatureFlags or nil;
 		PrettyPrint = prettyPrint;
 		VarNamePrefix = prefix;
 		Seed = seed;
 		parser = Parser:new({
 			LuaVersion = luaVersion;
+			FeatureFlags = profile and profile.FeatureFlags or nil;
 		});
 		unparser = Unparser:new({
 			LuaVersion = luaVersion;
@@ -77,7 +123,8 @@ end
 function Pipeline:fromConfig(config)
 	config = config or {};
 	local pipeline = Pipeline:new({
-		LuaVersion = config.LuaVersion or LuaVersion.Lua51;
+		LuaVersion = config.LuaVersion or Pipeline.DefaultSettings.LuaVersion;
+		CompatibilityProfile = config.CompatibilityProfile or Pipeline.DefaultSettings.CompatibilityProfile;
 		PrettyPrint = config.PrettyPrint or false;
 		VarNamePrefix = config.VarNamePrefix or "";
 		Seed = config.Seed or 0;
@@ -102,6 +149,9 @@ function Pipeline:fromConfig(config)
 end
 
 function Pipeline:addStep(step)
+	if step.SupportedLuaVersions and not step.SupportedLuaVersions[self.LuaVersion] then
+		logger:error(string.format("Step \"%s\" is not supported for %s", step.Name or "Unnamed", self.LuaVersion));
+	end
 	table.insert(self.steps, step);
 end
 
@@ -131,11 +181,13 @@ function Pipeline:setLuaVersion(luaVersion)
 
 	self.parser = Parser:new({
 		luaVersion = luaVersion;
+		FeatureFlags = self.FeatureFlags;
 	});
 	self.unparser = Unparser:new({
 		luaVersion = luaVersion;
 	});
 	self.conventions = conventions;
+	self.LuaVersion = luaVersion;
 end
 
 function Pipeline:getLuaVersion()
@@ -166,7 +218,26 @@ function Pipeline:apply(code, filename)
 	else
 		--> use secure random number generator
 		local success, seed = pcall(function()
-			local seedStr =  io.popen("openssl rand -hex 12"):read("*a"):gsub("\n", "")..""
+			local popen = io.popen("openssl rand -hex 12 2>/dev/null");
+			local seedStr = "";
+			if popen then
+				seedStr = (popen:read("*a") or ""):gsub("\n", "");
+				popen:close();
+			end
+			if seedStr == "" then
+				local mix = table.concat({
+					tostring(os.time()),
+					tostring(os.clock()),
+					tostring(collectgarbage("count")),
+					tostring(math.random()),
+					tostring({}),
+				}, ":");
+				local acc = 0;
+				for i = 1, #mix do
+					acc = (acc * 131 + mix:byte(i)) % 0x1fffffffffffff;
+				end
+				seedStr = string.format("%x", acc);
+			end
 			local seedNum = 0;
 
 			--> NOTE: tonumber caps at 1.844674407371e+19. So we use this instead.

@@ -8,6 +8,7 @@ return {
 	-- Minifies your code. Does not obfuscate it. No performance loss.
 	["Minify"] = {
 		LuaVersion = "Lua51",
+		CompatibilityProfile = "Lua51",
 		VarNamePrefix = "",
 		NameGenerator = "MangledShuffled",
 		PrettyPrint = false,
@@ -18,6 +19,7 @@ return {
 	-- Weak obfuscation. Very readable, low performance loss.
 	["Weak"] = {
 		LuaVersion = "Lua51",
+		CompatibilityProfile = "Lua51",
 		VarNamePrefix = "",
 		NameGenerator = "MangledShuffled",
 		PrettyPrint = false,
@@ -41,6 +43,7 @@ return {
 	-- Use the Weak, Medium, or Strong for obfuscation instead.
 	["Vmify"] = {
 		LuaVersion = "Lua51",
+		CompatibilityProfile = "Lua51",
 		VarNamePrefix = "",
 		NameGenerator = "MangledShuffled",
 		PrettyPrint = false,
@@ -53,6 +56,7 @@ return {
 	-- Medium obfuscation. Moderate obfuscation, moderate performance loss.
 	["Medium"] = {
 		LuaVersion = "Lua51",
+		CompatibilityProfile = "Lua51",
 		VarNamePrefix = "",
 		NameGenerator = "MangledShuffled",
 		PrettyPrint = false,
@@ -84,6 +88,7 @@ return {
 	-- Strong obfuscation, high performance loss.
 	["Strong"] = {
 		LuaVersion = "Lua51",
+		CompatibilityProfile = "Lua51",
 		VarNamePrefix = "",
 		NameGenerator = "MangledShuffled",
 		PrettyPrint = false,
@@ -114,6 +119,56 @@ return {
 					NumberRepresentationMutaton = true
 				},
 			},
+			{ Name = "WrapInFunction", Settings = {} },
+		},
+	},
+
+	["LuaU-Safe"] = {
+		LuaVersion = "LuaU",
+		CompatibilityProfile = "LuaU-safe",
+		VarNamePrefix = "",
+		NameGenerator = "MangledShuffled",
+		PrettyPrint = false,
+		Seed = 0,
+		Steps = {
+			{ Name = "EncryptStrings", Settings = {} },
+			{ Name = "Vmify", Settings = {} },
+			{
+				Name = "ConstantArray",
+				Settings = {
+					Threshold = 1,
+					StringsOnly = true,
+					Shuffle = true,
+					Rotate = true,
+					LocalWrapperThreshold = 0,
+				},
+			},
+			{ Name = "NumbersToExpressions", Settings = {} },
+			{ Name = "WrapInFunction", Settings = {} },
+		},
+	},
+
+	["LuaU-Typed"] = {
+		LuaVersion = "LuaU",
+		CompatibilityProfile = "LuaU-typed",
+		VarNamePrefix = "",
+		NameGenerator = "MangledShuffled",
+		PrettyPrint = false,
+		Seed = 0,
+		Steps = {
+			{ Name = "EncryptStrings", Settings = {} },
+			{ Name = "Vmify", Settings = {} },
+			{
+				Name = "ConstantArray",
+				Settings = {
+					Threshold = 1,
+					StringsOnly = true,
+					Shuffle = true,
+					Rotate = true,
+					LocalWrapperThreshold = 0,
+				},
+			},
+			{ Name = "NumbersToExpressions", Settings = {} },
 			{ Name = "WrapInFunction", Settings = {} },
 		},
 	},

@@ -186,11 +186,11 @@ end]]
     }
 end
 
-function EncryptStrings:apply(ast, _)
+function EncryptStrings:apply(ast, pipeline)
     local Encryptor = self:CreateEncryptionService();
 
 	local code = Encryptor.genCode();
-	local newAst = Parser:new({ LuaVersion = Enums.LuaVersion.Lua51 }):parse(code);
+	local newAst = Parser:new({ LuaVersion = pipeline and pipeline.LuaVersion or Enums.LuaVersion.Lua51 }):parse(code);
 	local doStat = newAst.body.statements[1];
 
 	local scope = ast.body.scope;

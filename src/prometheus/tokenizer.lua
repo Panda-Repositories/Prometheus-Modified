@@ -102,7 +102,7 @@ end
 
 -- Constructor for Tokenizer
 function Tokenizer:new(settings)
-	local luaVersion = (settings and (settings.luaVersion or settings.LuaVersion)) or LuaVersion.LuaU;
+	local luaVersion = (settings and (settings.luaVersion or settings.LuaVersion)) or LuaVersion.Lua51;
 	local conventions = Tokenizer.Conventions[luaVersion];
 
 	if(conventions == nil) then

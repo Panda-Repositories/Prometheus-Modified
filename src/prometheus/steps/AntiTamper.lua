@@ -20,6 +20,12 @@ AntiTamper.SettingsDescriptor = {
 		default = true,
 		description = "Use debug library. (Recommended, however scripts will not work without debug library.)",
 	},
+	FailMode = {
+		type = "enum",
+		values = { "error", "return", "loop" },
+		default = "error",
+		description = "Action when tampering is detected.",
+	},
 }
 
 local function generateSanityCheck()
@@ -87,6 +93,19 @@ function AntiTamper:apply(ast, pipeline)
 		return ast
 	end
 	local code = generateSanityCheck()
+	local tamperMessage = RandomStrings.randomString()
+	local failCode = [[
+		err();
+	]]
+	if self.FailMode == "return" then
+		failCode = [[
+		return;
+	]]
+	elseif self.FailMode == "loop" then
+		failCode = [[
+		while true do end
+	]]
+	end
 	if self.UseDebug then
 		local string = RandomStrings.randomString()
 		code = code
@@ -155,7 +174,7 @@ function AntiTamper:apply(ast, pipeline)
     end
     code = code .. [[
     local gmatch = string.gmatch;
-    local err = function() error("Tamper Detected!") end;
+    local err = function() error("]] .. tamperMessage .. [[") end;
 
     local pcallIntact2 = false;
     local pcallIntact = pcall(function()
@@ -203,23 +222,7 @@ function AntiTamper:apply(ast, pipeline)
     valid = valid and acc1 == acc2;
 
     if valid then else
-        repeat
-            return (function()
-                while true do
-                    l1, l2 = l2, l1;
-                    err();
-                end
-            end)();
-        until true;
-        while true do
-            l2 = random(1, 6);
-            if l2 > 2 then
-                l2 = tostring(l1);
-            else
-                l1 = l2;
-            end
-        end
-        return;
+		]] .. failCode .. [[
     end
 end
 
@@ -233,7 +236,7 @@ end
     repeat until valid;
     ]]
 
-    local parsed = Parser:new({LuaVersion = Enums.LuaVersion.Lua51}):parse(code);
+    local parsed = Parser:new({LuaVersion = pipeline and pipeline.LuaVersion or Enums.LuaVersion.Lua51}):parse(code);
     local doStat = parsed.body.statements[1];
     doStat.body.scope:setParent(ast.body.scope);
     table.insert(ast.body.statements, 1, doStat);

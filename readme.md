@@ -32,6 +32,17 @@ To quickly obfuscate a script:
 lua ./cli.lua --preset Medium ./your_file.lua
 ```
 
+### Compatibility profiles
+Prometheus now supports explicit compatibility profiles:
+- `Lua51` (default)
+- `LuaU-safe`
+- `LuaU-typed` (typed syntax parsing remains intentionally strict; unsupported typed constructs fail with clear parser errors)
+
+Example:
+```batch
+lua ./cli.lua --profile LuaU-safe --LuaU ./your_file.lua
+```
+
 ### Example output
 ```lua
 -- input.lua
@@ -45,6 +56,9 @@ return(function(...)local L={"afT6mf1V","/7mJXsuvmE1c/fT3";"tn1ZSn6=","37ghSJM="
 ```
 
 For more advanced use cases see the [Documentation](https://levno-710.gitbook.io/prometheus/).
+
+### LuaU support matrix
+See `/home/runner/work/Prometheus-Modified/Prometheus-Modified/doc/luau-feature-matrix.md` for currently supported LuaU features and strict failure behavior for unsupported typed syntax.
 ## Tests
 To perform the Prometheus Tests, just run
 ```batch
