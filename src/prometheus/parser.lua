@@ -1004,10 +1004,6 @@ function Parser:expressionLiteral(scope)
 	end
 
 	-- IfElse
-	if(not self.featureFlags.AllowIfElseExpression and is(self, TokenKind.Keyword, "if")) then
-		logger:error(generateError(self, "LuaU if-else expressions are not enabled in this profile."));
-	end
-
 	if(self.featureFlags.AllowIfElseExpression) then
 		if(consume(self, TokenKind.Keyword, "if")) then
 			local condition = self:expression(scope);

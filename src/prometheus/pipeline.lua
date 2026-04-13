@@ -218,7 +218,7 @@ function Pipeline:apply(code, filename)
 	else
 		--> use secure random number generator
 		local success, seed = pcall(function()
-			local popen = io.popen("openssl rand -hex 12 2>/dev/null");
+			local popen = io.popen("openssl rand -hex 12");
 			local seedStr = "";
 			if popen then
 				seedStr = (popen:read("*a") or ""):gsub("\n", "");
