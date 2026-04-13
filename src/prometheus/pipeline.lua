@@ -61,13 +61,13 @@ local Pipeline = {
 	Steps = Steps;
 	CompatibilityProfiles = CompatibilityProfiles;
 	DefaultSettings = {
-		LuaVersion = LuaVersion.Lua51; -- The Lua Version to use for the Tokenizer, Parser and Unparser
 		CompatibilityProfile = "Lua51";
 		PrettyPrint = false; -- Note that Pretty Print is currently not producing Pretty results
 		Seed = 0; -- The Seed. 0 or below uses the current time as a seed
 		VarNamePrefix = ""; -- The Prefix that every variable will start with
 	}
 }
+Pipeline.DefaultSettings.LuaVersion = CompatibilityProfiles[Pipeline.DefaultSettings.CompatibilityProfile].LuaVersion;
 
 local function resolveCompatibilityProfile(settings)
 	local profileName = settings.CompatibilityProfile or settings.compatibilityProfile or Pipeline.DefaultSettings.CompatibilityProfile;

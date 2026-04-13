@@ -92,10 +92,10 @@ function Parser:checkUnsupportedVersionToken()
 	local tk = self.tokens[self.index + 1] or Tokenizer.EOF_TOKEN;
 	if self.luaVersion == LuaVersion.Lua51 then
 		if tk.kind == TokenKind.Keyword and tk.source == "continue" then
-			logger:error(generateError(self, "Lua51 mode does not support \"continue\". Use --LuaU or a LuaU compatibility profile."));
+			logger:error(generateError(self, "Lua51 mode does not support \"continue\". Use LuaU mode or a LuaU compatibility profile."));
 		end
 		if tk.kind == TokenKind.Symbol and LUAU_ONLY_SYMBOL_LOOKUP[tk.source] then
-			logger:error(generateError(self, string.format("Lua51 mode does not support \"%s\" syntax. Use --LuaU or a LuaU compatibility profile.", tk.source)));
+			logger:error(generateError(self, string.format("Lua51 mode does not support \"%s\" syntax. Use LuaU mode or a LuaU compatibility profile.", tk.source)));
 		end
 	end
 end

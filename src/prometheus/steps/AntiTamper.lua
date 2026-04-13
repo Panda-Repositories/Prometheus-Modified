@@ -93,7 +93,7 @@ function AntiTamper:apply(ast, pipeline)
 		return ast
 	end
 	local code = generateSanityCheck()
-	local tamperMessage = RandomStrings.randomString()
+	local randomTamperMessage = RandomStrings.randomString()
 	local failCode = [[
 		err();
 	]]
@@ -174,7 +174,7 @@ function AntiTamper:apply(ast, pipeline)
     end
     code = code .. [[
     local gmatch = string.gmatch;
-    local err = function() error("]] .. tamperMessage .. [[") end;
+    local err = function() error("]] .. randomTamperMessage .. [[") end;
 
     local pcallIntact2 = false;
     local pcallIntact = pcall(function()

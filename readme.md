@@ -36,7 +36,9 @@ lua ./cli.lua --preset Medium ./your_file.lua
 Prometheus now supports explicit compatibility profiles:
 - `Lua51` (default)
 - `LuaU-safe`
-- `LuaU-typed` (typed syntax parsing remains intentionally strict; unsupported typed constructs fail with clear parser errors)
+- `LuaU-typed`
+
+Note: typed syntax handling is still strict; unsupported typed constructs fail with clear parser errors (see `doc/luau-feature-matrix.md`).
 
 Example:
 ```batch
