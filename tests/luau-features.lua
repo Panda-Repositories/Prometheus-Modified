@@ -7,4 +7,5 @@ for i = 1, 10 do
 	total += 1
 end
 
+assert(total == 35)
 print(total)

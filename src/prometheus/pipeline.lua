@@ -223,8 +223,11 @@ function Pipeline:apply(code, filename)
 			if popen then
 				seedStr = (popen:read("*a") or ""):gsub("\n", "");
 				popen:close();
+			else
+				logger:debug("OpenSSL command could not be started. Using mixed entropy fallback.")
 			end
 			if seedStr == "" then
+				logger:debug("OpenSSL output unavailable. Using mixed entropy fallback.")
 				local mix = table.concat({
 					tostring(os.time()),
 					tostring(os.clock()),

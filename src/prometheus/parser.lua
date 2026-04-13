@@ -39,6 +39,14 @@ local LUAU_ONLY_SYMBOL_LOOKUP = lookupify{
 	"::", "->", "?", "|", "&",
 };
 
+local LUAU_TYPED_SYMBOL_LOOKUP = lookupify{
+	":", "::", "->", "?", "|", "&",
+};
+
+local COMPOUND_ASSIGNMENT_SYMBOL_LOOKUP = lookupify{
+	"+=", "-=", "*=", "/=", "%=", "^=", "..=",
+};
+
 local CALLABLE_PREFIX_EXPRESSION_LOOKUP = lookupify{
 	AstKind.VariableExpression,
 	AstKind.IndexExpression,
@@ -105,7 +113,7 @@ function Parser:checkTypedSyntaxAllowed(context)
 		return;
 	end
 	local tk = self.tokens[self.index + 1] or Tokenizer.EOF_TOKEN;
-	if tk.kind == TokenKind.Symbol and (tk.source == ":" or tk.source == "::" or tk.source == "->" or tk.source == "?" or tk.source == "|" or tk.source == "&") then
+	if tk.kind == TokenKind.Symbol and LUAU_TYPED_SYMBOL_LOOKUP[tk.source] then
 		logger:error(generateError(self, string.format("LuaU typed syntax (%s) is not enabled in this profile%s.", tk.source, context and (" for " .. context) or "")));
 	end
 end
@@ -495,7 +503,7 @@ function Parser:statement(scope, currentLoop)
 					local rhs = self:expression(scope);
 					return Ast.CompoundConcatStatement(expr, rhs);
 				end
-			elseif is(self, TokenKind.Symbol, "+=") or is(self, TokenKind.Symbol, "-=") or is(self, TokenKind.Symbol, "*=") or is(self, TokenKind.Symbol, "/=") or is(self, TokenKind.Symbol, "%=") or is(self, TokenKind.Symbol, "^=") or is(self, TokenKind.Symbol, "..=") then
+			elseif COMPOUND_ASSIGNMENT_SYMBOL_LOOKUP[(self.tokens[self.index + 1] or Tokenizer.EOF_TOKEN).source] then
 				logger:error(generateError(self, "Compound assignment is not enabled in this profile."));
 			end
 
