@@ -109,13 +109,140 @@ function Parser:checkUnsupportedVersionToken()
 end
 
 function Parser:checkTypedSyntaxAllowed(context)
-	if self.featureFlags.AllowTypedSyntax then
+	local tk = self.tokens[self.index + 1] or Tokenizer.EOF_TOKEN;
+	if tk.kind ~= TokenKind.Symbol or not LUAU_TYPED_SYMBOL_LOOKUP[tk.source] then
 		return;
 	end
-	local tk = self.tokens[self.index + 1] or Tokenizer.EOF_TOKEN;
-	if tk.kind == TokenKind.Symbol and LUAU_TYPED_SYMBOL_LOOKUP[tk.source] then
-		logger:error(generateError(self, string.format("LuaU typed syntax (%s) is not enabled in this profile%s.", tk.source, context and (" for " .. context) or "")));
+	if self.luaVersion == LuaVersion.LuaU then
+		-- Silently strip LuaU type annotations so typed Roblox scripts pass through obfuscation.
+		self:skipLuauTypeAnnotation();
+		return;
 	end
+	logger:error(generateError(self, string.format("LuaU typed syntax (%s) is not enabled in this profile%s.", tk.source, context and (" for " .. context) or "")));
+end
+
+-- Consumes a leading typed-syntax symbol (`:`, `->`, `::`) together with the type expression that follows.
+function Parser:skipLuauTypeAnnotation()
+	local tk = self.tokens[self.index + 1] or Tokenizer.EOF_TOKEN;
+	if tk.kind == TokenKind.Symbol and (tk.source == ":" or tk.source == "->" or tk.source == "::") then
+		self.index = self.index + 1;
+		self:skipLuauTypeExpression();
+	end
+end
+
+function Parser:skipLuauTypeExpression()
+	self:skipLuauTypeSimple();
+	while is(self, TokenKind.Symbol, "|") or is(self, TokenKind.Symbol, "&") do
+		self.index = self.index + 1;
+		self:skipLuauTypeSimple();
+	end
+end
+
+function Parser:skipLuauTypeSimple()
+	if consume(self, TokenKind.Symbol, "(") then
+		if not is(self, TokenKind.Symbol, ")") then
+			self:skipLuauTypeMaybeNamed();
+			while consume(self, TokenKind.Symbol, ",") do
+				self:skipLuauTypeMaybeNamed();
+			end
+		end
+		expect(self, TokenKind.Symbol, ")");
+		if consume(self, TokenKind.Symbol, "->") then
+			self:skipLuauTypeExpression();
+		end
+	elseif is(self, TokenKind.Symbol, "{") then
+		self:skipLuauTableType();
+	elseif is(self, TokenKind.Ident) then
+		local head = peek(self);
+		local next1 = peek(self, 1);
+		if head.value == "typeof" and next1.kind == TokenKind.Symbol and next1.source == "(" then
+			self.index = self.index + 2;
+			local depth = 1;
+			while depth > 0 do
+				local t = peek(self);
+				if t.kind == TokenKind.Eof then break end
+				if t.kind == TokenKind.Symbol and t.source == "(" then depth = depth + 1;
+				elseif t.kind == TokenKind.Symbol and t.source == ")" then
+					depth = depth - 1;
+					if depth == 0 then break end
+				end
+				self.index = self.index + 1;
+			end
+			expect(self, TokenKind.Symbol, ")");
+		else
+			self.index = self.index + 1;
+			while consume(self, TokenKind.Symbol, ".") do
+				expect(self, TokenKind.Ident);
+			end
+			if consume(self, TokenKind.Symbol, "<") then
+				self:skipLuauTypeExpression();
+				while consume(self, TokenKind.Symbol, ",") do
+					self:skipLuauTypeExpression();
+				end
+				expect(self, TokenKind.Symbol, ">");
+			end
+		end
+	elseif is(self, TokenKind.Keyword, "nil") or is(self, TokenKind.Keyword, "true")
+		or is(self, TokenKind.Keyword, "false") or is(self, TokenKind.Keyword, "function")
+		or is(self, TokenKind.String) or is(self, TokenKind.Number) then
+		self.index = self.index + 1;
+	end
+	consume(self, TokenKind.Symbol, "?");
+end
+
+function Parser:skipLuauTypeMaybeNamed()
+	if is(self, TokenKind.Symbol, "...") then
+		self.index = self.index + 1;
+		self:skipLuauTypeExpression();
+		return;
+	end
+	if is(self, TokenKind.Ident) and is(self, TokenKind.Symbol, ":", 1) then
+		self.index = self.index + 2;
+	end
+	self:skipLuauTypeExpression();
+end
+
+-- Consume a LuaU generic parameter list (e.g. `<T, U...>` or `<T = number>`) if present.
+function Parser:skipLuauGenericParamList()
+	if self.luaVersion ~= LuaVersion.LuaU then return end
+	if not is(self, TokenKind.Symbol, "<") then return end
+	self.index = self.index + 1;
+	local depth = 1;
+	while depth > 0 do
+		local t = peek(self);
+		if t.kind == TokenKind.Eof then break end
+		if t.kind == TokenKind.Symbol and t.source == "<" then
+			depth = depth + 1;
+		elseif t.kind == TokenKind.Symbol and t.source == ">" then
+			depth = depth - 1;
+			if depth == 0 then break end
+		end
+		self.index = self.index + 1;
+	end
+	expect(self, TokenKind.Symbol, ">");
+end
+
+function Parser:skipLuauTableType()
+	expect(self, TokenKind.Symbol, "{");
+	if not is(self, TokenKind.Symbol, "}") then
+		while true do
+			if consume(self, TokenKind.Symbol, "[") then
+				self:skipLuauTypeExpression();
+				expect(self, TokenKind.Symbol, "]");
+				expect(self, TokenKind.Symbol, ":");
+				self:skipLuauTypeExpression();
+			elseif is(self, TokenKind.Ident) and is(self, TokenKind.Symbol, ":", 1) then
+				self.index = self.index + 2;
+				self:skipLuauTypeExpression();
+			else
+				self:skipLuauTypeExpression();
+			end
+			if not (consume(self, TokenKind.Symbol, ",") or consume(self, TokenKind.Symbol, ";")) then
+				break;
+			end
+		end
+	end
+	expect(self, TokenKind.Symbol, "}");
 end
 
 -- Function to peek the n'th token
@@ -225,15 +352,34 @@ end
 
 function Parser:statement(scope, currentLoop)
 	self:checkUnsupportedVersionToken();
-	if(not self.featureFlags.AllowTypedSyntax and self.luaVersion == LuaVersion.LuaU) then
-		if is(self, TokenKind.Ident, "type", 0) and is(self, TokenKind.Ident, 1) and is(self, TokenKind.Symbol, "=", 2) then
-			logger:error(generateError(self, "LuaU typed declarations are not enabled in this profile."));
+	if(self.luaVersion == LuaVersion.LuaU) then
+		-- Silently strip LuaU type / export type declarations (obfuscation discards types anyway).
+		if is(self, TokenKind.Ident, "type", 0) and is(self, TokenKind.Ident, 1) then
+			self.index = self.index + 2;
+			if consume(self, TokenKind.Symbol, "<") then
+				local depth = 1;
+				while depth > 0 do
+					local t = peek(self);
+					if t.kind == TokenKind.Eof then break end
+					if t.kind == TokenKind.Symbol and t.source == "<" then depth = depth + 1;
+					elseif t.kind == TokenKind.Symbol and t.source == ">" then
+						depth = depth - 1;
+						if depth == 0 then break end
+					end
+					self.index = self.index + 1;
+				end
+				expect(self, TokenKind.Symbol, ">");
+			end
+			expect(self, TokenKind.Symbol, "=");
+			self:skipLuauTypeExpression();
+			return self:statement(scope, currentLoop);
 		end
 		if is(self, TokenKind.Ident, "export", 0) and is(self, TokenKind.Ident, "type", 1) then
-			logger:error(generateError(self, "LuaU typed declarations are not enabled in this profile."));
+			self.index = self.index + 1;
+			return self:statement(scope, currentLoop);
 		end
 		if is(self, TokenKind.Ident, "declare", 0) then
-			logger:error(generateError(self, "LuaU declaration syntax is not enabled in this profile."));
+			logger:error(generateError(self, "LuaU 'declare' syntax is not supported by the obfuscator. Remove declare statements before obfuscating."));
 		end
 	end
 
@@ -340,6 +486,7 @@ function Parser:statement(scope, currentLoop)
 
 		local funcScope = Scope:new(scope);
 
+		self:skipLuauGenericParamList();
 		expect(self, TokenKind.Symbol, "(");
 		local args = self:functionArgList(funcScope);
 		expect(self, TokenKind.Symbol, ")");
@@ -367,6 +514,7 @@ function Parser:statement(scope, currentLoop)
 			local id = scope:addVariable(name, ident);
 			local funcScope = Scope:new(scope);
 
+			self:skipLuauGenericParamList();
 			expect(self, TokenKind.Symbol, "(");
 			local args = self:functionArgList(funcScope);
 			expect(self, TokenKind.Symbol, ")");
@@ -579,11 +727,13 @@ function Parser:nameList(scope)
 	local ident = expect(self, TokenKind.Ident);
 	local id = scope:addDisabledVariable(ident.value, ident);
 	table.insert(ids, id);
+	self:checkTypedSyntaxAllowed("local declarations");
 
 	while(consume(self, TokenKind.Symbol, ",")) do
 		ident = expect(self, TokenKind.Ident);
 		id = scope:addDisabledVariable(ident.value, ident);
 		table.insert(ids, id);
+		self:checkTypedSyntaxAllowed("local declarations");
 	end
 
 	return ids;
@@ -776,11 +926,13 @@ end
 function Parser:expressionPow(scope)
 	local lhs = self:tableOrFunctionLiteral(scope);
 
-	if(consume(self, TokenKind.Symbol, "::")) then
-		if not self.featureFlags.AllowTypedSyntax then
-			logger:error(generateError(self, "LuaU type assertions (::) are not enabled in this profile."));
+	if(is(self, TokenKind.Symbol, "::")) then
+		if self.luaVersion == LuaVersion.LuaU then
+			-- Strip LuaU type assertion; the cast has no runtime effect so lhs stands alone.
+			self:skipLuauTypeAnnotation();
+		else
+			logger:error(generateError(self, "LuaU type assertions (::) are only available in LuaU mode."));
 		end
-		logger:error(generateError(self, "LuaU type assertions (::) are not implemented yet in this parser."));
 	end
 
 	if(consume(self, TokenKind.Symbol, "^")) then
@@ -811,6 +963,7 @@ function Parser:expressionFunctionLiteral(parentScope)
 
 	expect(self, TokenKind.Keyword, "function");
 
+	self:skipLuauGenericParamList();
 	expect(self, TokenKind.Symbol, "(");
 	local args = self:functionArgList(scope);
 	expect(self, TokenKind.Symbol, ")");
@@ -826,6 +979,7 @@ function Parser:functionArgList(scope)
 	local args = {};
 	if(consume(self, TokenKind.Symbol, "...")) then
 		table.insert(args, Ast.VarargExpression());
+		self:checkTypedSyntaxAllowed("vararg annotation");
 		return args;
 	end
 
@@ -840,6 +994,7 @@ function Parser:functionArgList(scope)
 		while(consume(self, TokenKind.Symbol, ",")) do
 			if(consume(self, TokenKind.Symbol, "...")) then
 				table.insert(args, Ast.VarargExpression());
+				self:checkTypedSyntaxAllowed("vararg annotation");
 				return args;
 			end
 

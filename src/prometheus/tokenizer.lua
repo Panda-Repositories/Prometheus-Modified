@@ -145,6 +145,7 @@ function Tokenizer:new(settings)
 
 		StringStartLookup = lookupify({"\"", "\'"}),
 		annotations = {},
+		pendingTokens = {},
 	};
 
 	setmetatable(tokenizer, self);
@@ -160,6 +161,7 @@ function Tokenizer:reset()
 	self.source = "";
 	self.annotations = {};
 	self.columnMap = {};
+	self.pendingTokens = {};
 end
 
 -- Append String to this Tokenizer
@@ -486,8 +488,131 @@ function Tokenizer:symbol()
 end
 
 
+-- Desugar a LuaU interpolated string (`\`text {expr}\``) into a synthetic
+-- `string.format(fmt, ...)` token stream. Keeps parser and AST untouched — the
+-- obfuscator doesn't need to preserve the backtick form in output.
+function Tokenizer:interpolatedString()
+	local startPos = self.index;
+	expect(self, "`");
+
+	local chunks = {};
+	local expressions = {};
+	local buffer = {};
+
+	while not is(self, "`") do
+		if self.index >= self.length then
+			logger:error(generateError(self, "Unterminated interpolated string"));
+		end
+		local char = get(self);
+		if char == "\\" then
+			local nxt = get(self);
+			if nxt == "`" then
+				buffer[#buffer + 1] = "`";
+			elseif nxt == "{" then
+				buffer[#buffer + 1] = "{";
+			elseif type(self.EscapeSequences[nxt]) == "string" then
+				buffer[#buffer + 1] = self.EscapeSequences[nxt];
+			else
+				buffer[#buffer + 1] = nxt;
+			end
+		elseif char == "{" then
+			chunks[#chunks + 1] = table.concat(buffer);
+			buffer = {};
+			local exprStart = self.index;
+			local depth = 1;
+			local inString = nil;
+			while depth > 0 do
+				if self.index >= self.length then
+					logger:error(generateError(self, "Unterminated interpolated string expression"));
+				end
+				local c = self.source:sub(self.index + 1, self.index + 1);
+				if inString then
+					if c == "\\" then
+						self.index = self.index + 2;
+					elseif c == inString then
+						inString = nil;
+						self.index = self.index + 1;
+					else
+						self.index = self.index + 1;
+					end
+				elseif c == "\"" or c == "'" then
+					inString = c;
+					self.index = self.index + 1;
+				elseif c == "{" then
+					depth = depth + 1;
+					self.index = self.index + 1;
+				elseif c == "}" then
+					depth = depth - 1;
+					if depth == 0 then break end
+					self.index = self.index + 1;
+				else
+					self.index = self.index + 1;
+				end
+			end
+			local exprSource = self.source:sub(exprStart + 1, self.index);
+			expect(self, "}");
+			local sub = Tokenizer:new({ luaVersion = self.luaVersion });
+			sub:append(exprSource);
+			local subTokens = sub:scanAll();
+			if subTokens[#subTokens] and subTokens[#subTokens].kind == Tokenizer.TokenKind.Eof then
+				subTokens[#subTokens] = nil;
+			end
+			expressions[#expressions + 1] = subTokens;
+		elseif char == "\n" then
+			self.index = self.index - 1;
+			logger:error(generateError(self, "Unterminated interpolated string"));
+		else
+			buffer[#buffer + 1] = char;
+		end
+	end
+	chunks[#chunks + 1] = table.concat(buffer);
+	expect(self, "`");
+
+	if #expressions == 0 then
+		return token(self, startPos, Tokenizer.TokenKind.String, chunks[1]);
+	end
+
+	local escapedChunks = {};
+	for i, c in ipairs(chunks) do
+		escapedChunks[i] = c:gsub("%%", "%%%%");
+	end
+	local fmt = table.concat(escapedChunks, "%s");
+
+	local line, linePos = self:getPosition(startPos);
+	local function synth(kind, value, source)
+		return {
+			kind = kind,
+			value = value,
+			source = source or tostring(value),
+			startPos = startPos,
+			endPos = self.index,
+			line = line,
+			linePos = linePos,
+			annotations = {},
+		};
+	end
+
+	local head = synth(Tokenizer.TokenKind.Ident, "string", "string");
+	table.insert(self.pendingTokens, synth(Tokenizer.TokenKind.Symbol, ".", "."));
+	table.insert(self.pendingTokens, synth(Tokenizer.TokenKind.Ident, "format", "format"));
+	table.insert(self.pendingTokens, synth(Tokenizer.TokenKind.Symbol, "(", "("));
+	table.insert(self.pendingTokens, synth(Tokenizer.TokenKind.String, fmt, string.format("%q", fmt)));
+	for _, exprTokens in ipairs(expressions) do
+		table.insert(self.pendingTokens, synth(Tokenizer.TokenKind.Symbol, ",", ","));
+		for _, t in ipairs(exprTokens) do
+			table.insert(self.pendingTokens, t);
+		end
+	end
+	table.insert(self.pendingTokens, synth(Tokenizer.TokenKind.Symbol, ")", ")"));
+
+	return head;
+end
+
 -- get the Next token
 function Tokenizer:next()
+	if self.pendingTokens and #self.pendingTokens > 0 then
+		return table.remove(self.pendingTokens, 1);
+	end
 	-- Skip All Whitespace before the token
 	self:skipWhitespaceAndComments();
 
@@ -509,6 +634,11 @@ function Tokenizer:next()
 	-- Singleline String Literals
 	if(is(self, self.StringStartLookup)) then
 		return self:singleLineString();
+	end
+
+	-- LuaU Interpolated String Literals (backtick-delimited)
+	if(self.luaVersion == LuaVersion.LuaU and is(self, "`")) then
+		return self:interpolatedString();
 	end
 
 	-- Multiline String Literals

@@ -1,82 +1,88 @@
-# :fire: Prometheus Lua Obfuscator
-[![Test](https://github.com/prometheus-lua/Prometheus/actions/workflows/Test.yml/badge.svg)](https://github.com/prometheus-lua/Prometheus/actions/workflows/Test.yml)
+# :panda_face: Panda Obfuscator v1.3
+[![Test](https://github.com/Panda-Repositories/Prometheus-Modified/actions/workflows/Test.yml/badge.svg)](https://github.com/Panda-Repositories/Prometheus-Modified/actions/workflows/Test.yml)
 
-Prometheus is a Lua obfuscator written in pure Lua.
-It uses several AST-based transformations including Control-Flow Flattening, Constant Encryption and more.
+Panda Obfuscator is a Lua obfuscator written in pure Lua, based on Prometheus.
+It uses AST-based transformations including Control-Flow Flattening, Constant Encryption, VM virtualization, and hardened handler polymorphism.
 
-This project was inspired by the amazing [javascript-obfuscator](https://github.com/javascript-obfuscator/javascript-obfuscator).  
-It can currently obfuscate Lua51 and Roblox's LuaU, however LuaU support is not finished yet.
-
-You can find the full Documentation including a getting started guide [here](https://levno-710.gitbook.io/prometheus/).
-
-Prometheus has an official [Discord server](https://discord.gg/U8h4d4Rf64).
+Panda Obfuscator targets both **Lua 5.1** and **Roblox Luau** and ships a Xenon-safe preset that avoids high-UNC APIs (`debug.sethook`, `string.dump`, `hookfunction`, `getrawmetatable`).
 
 <p align="center">
-  <img src="assets/readme/obfuscation-preview.gif" alt="Prometheus obfuscation process preview" width="900" />
+  <img src="assets/readme/obfuscation-preview.gif" alt="Panda Obfuscator preview" width="900" />
 </p>
 
 ## Installation
-To install Prometheus, simply clone the GitHub repository using:
 
 ```batch
-git clone https://github.com/prometheus-lua/Prometheus.git
+git clone https://github.com/Panda-Repositories/Prometheus-Modified.git
+cd Prometheus-Modified
 ```
 
-Alternatively you can download the sources [here](https://github.com/prometheus-lua/Prometheus/archive/refs/heads/master.zip).
+### Ready-to-use (Windows)
+Run the installer once — it downloads Lua 5.1.5 into `.\bin\`:
+```batch
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+Then obfuscate with the `panda.bat` wrapper:
+```batch
+panda.bat --preset Panda-Xenon your_script.lua
+```
 
-Prometheus also Requires LuaJIT or Lua51 in order to work. The Lua51 binaries can be downloaded [here](https://sourceforge.net/projects/luabinaries/files/5.1.5/Tools%20Executables/).
+### Ready-to-use (Linux / macOS)
+Install Lua 5.1 via your package manager:
+```bash
+sudo apt install lua5.1         # Debian / Ubuntu
+brew install lua@5.1            # macOS
+```
+Then run:
+```bash
+chmod +x ./panda.sh
+./panda.sh --preset Panda-Xenon your_script.lua
+```
+
+### Manual
+Requires LuaJIT or Lua 5.1. Binaries: https://sourceforge.net/projects/luabinaries/files/5.1.5/Tools%20Executables/
+```batch
+lua ./cli.lua --preset Medium your_script.lua
+```
 
 ## Usage
-To quickly obfuscate a script:
 ```batch
-lua ./cli.lua --preset Medium ./your_file.lua
+panda.bat --preset Panda-Xenon your_script.lua
+panda.bat --preset Panda-Roblox-Strong your_script.lua
+panda.bat --preset Medium --out out.lua your_script.lua
 ```
+
+### Presets
+- `Minify` – whitespace/rename only
+- `Weak` / `Medium` / `Strong` – Lua 5.1 pipelines
+- `LuaU-Safe` / `LuaU-Typed` – Luau pipelines (compat profiles)
+- `Panda-Xenon` – Luau, low-UNC safe for Xenon and similar executors
+- `Panda-Roblox-Strong` – heaviest Luau pipeline with double Vmify
 
 ### Compatibility profiles
-Prometheus now supports explicit compatibility profiles:
 - `Lua51` (default)
 - `LuaU-safe`
-- `LuaU-typed`
+- `LuaU-typed` – accepts type annotations; obfuscation strips them
 
-Note: typed syntax handling is still strict; unsupported typed constructs fail with clear parser errors (see `doc/luau-feature-matrix.md`).
-
-Example:
 ```batch
 lua ./cli.lua --profile LuaU-safe --LuaU ./your_file.lua
+lua ./cli.lua --preset Panda-Xenon ./roblox_script.lua
 ```
 
-### Example output
-```lua
--- input.lua
-print("Hello, World!");
-```
+### LuaU feature matrix
+See `doc/luau-feature-matrix.md`.
 
-```lua
--- input.obfuscated.lua
-return(function(...)local L={"afT6mf1V","/7mJXsuvmE1c/fT3";"tn1ZSn6=","37ghSJM=";"WqermfWAWuuZpb3XX7M=","tqXGSJ3u","XQXpL9x21dxAWJa//p==","SrM=";"3q+5SJM=","/D==";"t7XUt0p=";"mIeOmIx9";"LdgrBfWdWuNABsb+KJxj","SJWJ4dahKsebW7t+KQv=","/cDu3AvP/D==";"Llv7uD==","tJWhFfTE";"TQ43ctIuy9HIop==","mEu93p==";"WJax1sXEXEaxWuxGt6==","t0gPSEp=",...
--- remaining obfuscated output omitted
-```
-
-For more advanced use cases see the [Documentation](https://levno-710.gitbook.io/prometheus/).
-
-### LuaU support matrix
-See `doc/luau-feature-matrix.md` for currently supported LuaU features and strict failure behavior for unsupported typed syntax.
 ## Tests
-To perform the Prometheus Tests, just run
 ```batch
 lua ./tests.lua [--Linux]
 ```
 
-## License and Commercial Use
+## License and Attribution
 
-Prometheus is licensed under the Prometheus License, a modified MIT-style license.
-You are free to use, modify, and distribute this software, including for commercial purposes, under the following conditions:
- - Any commercial product, wrapper, or service (including SaaS or hosted solutions) that uses or integrates Prometheus must include clear attribution to:
-```
-Based on Prometheus by Elias Oelschner, https://github.com/prometheus-lua/Prometheus
-```
- - The attribution must be visible in the product’s UI, documentation, and public website.
- - The obfuscated output files generated by Prometheus do not need to include any license or copyright notice.
- - Derivative works and public forks must also include a statement in their README noting that they are based on Prometheus.
+Panda Obfuscator is a derivative work of **Prometheus** by Elias Oelschner (levno-710), licensed under the Prometheus License (MIT-style with attribution).
 
-Full license text: [Prometheus License](https://github.com/levno-710/Prometheus/blob/master/LICENSE)
+> Based on Prometheus by Elias Oelschner, https://github.com/prometheus-lua/Prometheus
+
+Any commercial product, wrapper, or service (including SaaS) built on Panda Obfuscator must include visible attribution to the upstream Prometheus project as required by its license. Obfuscated output files do not need to include any license notice.
+
+Full upstream license text: [Prometheus License](https://github.com/levno-710/Prometheus/blob/master/LICENSE)

@@ -209,23 +209,59 @@ return function(Compiler)
         table.sort(blocks, function(a, b) return a.id < b.id end);
 
         -- Build a strict threshold condition between adjacent block IDs.
-        -- Using a midpoint avoids exact-id comparisons while preserving dispatch.
+        -- Using a random bound strictly between the two IDs avoids recognizable midpoint math.
+        local function randomBoundBetween(leftId, rightId)
+            if rightId - leftId <= 1 then
+                return (leftId + rightId) / 2;
+            end
+            return math.random(leftId + 1, rightId - 1);
+        end
+
+        -- Wrap a condition with an opaque predicate that is always true but references pos,
+        -- preventing naive DCE / constant folding from simplifying the dispatch.
+        local function wrapOpaque(condition, scope)
+            if math.random(1, 3) ~= 1 then
+                return condition;
+            end
+            local posExpr = self:pos(scope);
+            local posExpr2 = self:pos(scope);
+            -- posExpr == posExpr is always true for any numeric pos value.
+            local alwaysTrue = Ast.EqualsExpression(posExpr, posExpr2);
+            if math.random(1, 2) == 1 then
+                return Ast.AndExpression(alwaysTrue, condition);
+            end
+            return Ast.AndExpression(condition, alwaysTrue);
+        end
+
         local function buildBlockThresholdCondition(scope, leftId, rightId, useAndOr)
-            local bound = math.floor((leftId + rightId) / 2);
+            local bound = randomBoundBetween(leftId, rightId);
             local posExpr = self:pos(scope);
             local boundExpr = Ast.NumberExpression(bound);
 
             if useAndOr then
-                -- Kept for compatibility with caller variations.
-                return Ast.LessThanExpression(posExpr, boundExpr);
-            else
-                local variant = math.random(1, 2);
-                if variant == 1 then
-                    return Ast.LessThanExpression(posExpr, boundExpr);
-                else
-                    return Ast.GreaterThanExpression(boundExpr, posExpr);
-                end
+                return wrapOpaque(Ast.LessThanExpression(posExpr, boundExpr), scope);
             end
+
+            local variant = math.random(1, 6);
+            local cond;
+            if variant == 1 then
+                cond = Ast.LessThanExpression(posExpr, boundExpr);
+            elseif variant == 2 then
+                cond = Ast.GreaterThanExpression(boundExpr, posExpr);
+            elseif variant == 3 then
+                -- not (pos >= bound)  <=>  pos < bound
+                cond = Ast.NotExpression(Ast.GreaterThanOrEqualsExpression(posExpr, boundExpr));
+            elseif variant == 4 then
+                -- not (bound <= pos)  <=>  pos < bound
+                cond = Ast.NotExpression(Ast.LessThanOrEqualsExpression(boundExpr, posExpr));
+            elseif variant == 5 then
+                -- pos - bound < 0  <=>  pos < bound
+                cond = Ast.LessThanExpression(Ast.SubExpression(posExpr, boundExpr), Ast.NumberExpression(0));
+            else
+                -- 0 > pos - bound  <=>  pos < bound
+                cond = Ast.GreaterThanExpression(Ast.NumberExpression(0), Ast.SubExpression(posExpr, boundExpr));
+            end
+            return wrapOpaque(cond, scope);
         end
 
         -- Build an elseif chain for a range of blocks
@@ -277,32 +313,43 @@ return function(Compiler)
             local mid = l + math.ceil(len / 2);
             local leftMaxId = tb[mid - 1].id;
             local rightMinId = tb[mid].id;
-            -- Float-safe split: any bound strictly between adjacent IDs works.
-            -- Midpoint avoids integer-only math.random(min, max) behavior.
-            local bound = math.floor((leftMaxId + rightMinId) / 2);
+            -- Random bound strictly between adjacent IDs breaks midpoint fingerprinting.
+            local bound = randomBoundBetween(leftMaxId, rightMinId);
             local ifScope = Scope:new(pScope);
 
             local lBlock = buildElseifChain(tb, l, mid - 1, ifScope);
             local rBlock = buildElseifChain(tb, mid, r, ifScope);
 
-            -- Randomly choose between different condition styles
-            local condStyle = math.random(1, 3);
+            local condStyle = math.random(1, 6);
             local condition;
             local trueBlock, falseBlock;
+            local boundExpr = Ast.NumberExpression(bound);
 
             if condStyle == 1 then
-                -- pos < bound
-                condition = Ast.LessThanExpression(self:pos(ifScope), Ast.NumberExpression(bound));
+                condition = Ast.LessThanExpression(self:pos(ifScope), boundExpr);
                 trueBlock, falseBlock = lBlock, rBlock;
             elseif condStyle == 2 then
-                -- bound > pos
-                condition = Ast.GreaterThanExpression(Ast.NumberExpression(bound), self:pos(ifScope));
+                condition = Ast.GreaterThanExpression(boundExpr, self:pos(ifScope));
+                trueBlock, falseBlock = lBlock, rBlock;
+            elseif condStyle == 3 then
+                -- Strict > with reversed branches.
+                condition = Ast.GreaterThanExpression(self:pos(ifScope), boundExpr);
+                trueBlock, falseBlock = rBlock, lBlock;
+            elseif condStyle == 4 then
+                -- not (pos >= bound): equivalent to pos < bound.
+                condition = Ast.NotExpression(Ast.GreaterThanOrEqualsExpression(self:pos(ifScope), boundExpr));
+                trueBlock, falseBlock = lBlock, rBlock;
+            elseif condStyle == 5 then
+                -- pos - bound < 0
+                condition = Ast.LessThanExpression(Ast.SubExpression(self:pos(ifScope), boundExpr), Ast.NumberExpression(0));
                 trueBlock, falseBlock = lBlock, rBlock;
             else
-                -- Equivalent split using strict > with branches reversed.
-                condition = Ast.GreaterThanExpression(self:pos(ifScope), Ast.NumberExpression(bound));
-                trueBlock, falseBlock = rBlock, lBlock;
+                -- pos + (-bound) < 0 — same result, different tokens.
+                condition = Ast.LessThanExpression(Ast.AddExpression(self:pos(ifScope), Ast.NumberExpression(-bound)), Ast.NumberExpression(0));
+                trueBlock, falseBlock = lBlock, rBlock;
             end
+
+            condition = wrapOpaque(condition, ifScope);
 
             return Ast.Block({
                 Ast.IfStatement(condition, trueBlock, {}, falseBlock);

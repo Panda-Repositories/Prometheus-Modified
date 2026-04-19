@@ -20,11 +20,16 @@ AntiTamper.SettingsDescriptor = {
 		default = true,
 		description = "Use debug library. (Recommended, however scripts will not work without debug library.)",
 	},
+	XenonSafe = {
+		type = "boolean",
+		default = false,
+		description = "Force Xenon / low-UNC compatibility: disables UseDebug and avoids debug.sethook, string.dump, debug.getupvalue paths.",
+	},
 	FailMode = {
 		type = "enum",
-		values = { "error", "return", "loop" },
+		values = { "error", "return", "loop", "silent" },
 		default = "error",
-		description = "Action when tampering is detected.",
+		description = "Action when tampering is detected. 'silent' returns without raising; recommended for Xenon presets where detection is unreliable.",
 	},
 }
 
@@ -92,12 +97,16 @@ function AntiTamper:apply(ast, pipeline)
 		logger:warn(string.format('"%s" cannot be used with PrettyPrint, ignoring "%s"', self.Name, self.Name))
 		return ast
 	end
+	-- XenonSafe overrides: the debug-hook / string.dump paths break on low-UNC executors.
+	if self.XenonSafe then
+		self.UseDebug = false
+	end
 	local code = generateSanityCheck()
 	local tamperDetectionMessage = RandomStrings.randomString()
 	local failCode = [[
 		err();
 	]]
-	if self.FailMode == "return" then
+	if self.FailMode == "return" or self.FailMode == "silent" then
 		failCode = [[
 		return;
 	]]
@@ -233,8 +242,11 @@ end
     obj[math.random(1, 100)] = obj;
     (function() end)(obj);
 
+    ]] .. (self.FailMode == "silent" and [[
+    if not valid then return end
+    ]] or [[
     repeat until valid;
-    ]]
+    ]])
 
     local parsed = Parser:new({LuaVersion = pipeline and pipeline.LuaVersion or Enums.LuaVersion.Lua51}):parse(code);
     local doStat = parsed.body.statements[1];
