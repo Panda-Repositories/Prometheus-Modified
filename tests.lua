@@ -6,6 +6,8 @@
 
 -- Require Prometheus
 local Prometheus = require("src.prometheus")
+local Parser = require("src.prometheus.parser")
+local Enums = require("src.prometheus.enums")
 
 -- Enable Debugging
 -- logger.logLevel = logger.LogLevel.Debug;
@@ -86,6 +88,18 @@ local function shallowcopy(orig)
     return copy
 end
 
+local function clonePreset(preset)
+	local copy = shallowcopy(preset)
+	copy.Steps = {}
+	for i, step in ipairs(preset.Steps or {}) do
+		copy.Steps[i] = {
+			Name = step.Name,
+			Settings = shallowcopy(step.Settings or {}),
+		}
+	end
+	return copy
+end
+
 local function validate(a, b)
 	local outa = "";
 	local outb = "";
@@ -121,37 +135,55 @@ Prometheus.Logger.logLevel = Prometheus.Logger.LogLevel.Error;
 local fc = 0;
 for _, filename in ipairs(scandir(testdir)) do
 	local path = testdir .. filename;
+	local isLuaUTest = filename:sub(1, 5) == "luau-"
 	local file = io.open(path,"r");
 
 	local code = file:read("*a");
 	print(Prometheus.colors("[CURRENT] ", "magenta") .. filename);
 	for name, preset in pairs(presets) do
-		for i = #preset.Steps, 1, -1 do
-			if preset.Steps[i].Name == "AntiTamper" then
-				table.remove(preset.Steps, i);
+		local runPreset = clonePreset(preset)
+		for i = #runPreset.Steps, 1, -1 do
+			if runPreset.Steps[i].Name == "AntiTamper" then
+				table.remove(runPreset.Steps, i);
 			end
+		end
+		if isLuaUTest then
+			runPreset.LuaVersion = "LuaU"
+			runPreset.CompatibilityProfile = "LuaU-safe"
 		end
 
 		for _ = 1, iterationCount do
-			pipeline = Prometheus.Pipeline:fromConfig(preset);
+			pipeline = Prometheus.Pipeline:fromConfig(runPreset);
 			local obfuscated = pipeline:apply(code);
 
-			local funca = loadstring(code);
-			local funcb = loadstring(obfuscated);
-
-			if funcb == nil then
-				print(Prometheus.colors("[FAILED]  ", "red") .. "(" .. filename .. "): " .. name .. ", Invalid Lua!");
-				print("[SOURCE]", obfuscated);
-				fc = fc + 1;
+			if isLuaUTest then
+				local ok, err = pcall(function()
+					Parser:new({ LuaVersion = Enums.LuaVersion.LuaU }):parse(obfuscated)
+				end)
+				if not ok then
+					print(Prometheus.colors("[FAILED]  ", "red") .. "(" .. filename .. "): " .. name .. ", Invalid LuaU!")
+					print("[ERR]     ", tostring(err))
+					print("[SOURCE]", obfuscated)
+					fc = fc + 1
+				end
 			else
-				local validated, outa, outb = validate(funca, funcb);
+				local funca = loadstring(code);
+				local funcb = loadstring(obfuscated);
 
-				if not validated then
-					print(Prometheus.colors("[FAILED]  ", "red") .. "(" .. filename .. "): " .. name);
-					print("[OUTA]    ", outa);
-					print("[OUTB]    ", outb);
+				if funcb == nil then
+					print(Prometheus.colors("[FAILED]  ", "red") .. "(" .. filename .. "): " .. name .. ", Invalid Lua!");
 					print("[SOURCE]", obfuscated);
 					fc = fc + 1;
+				else
+					local validated, outa, outb = validate(funca, funcb);
+
+					if not validated then
+						print(Prometheus.colors("[FAILED]  ", "red") .. "(" .. filename .. "): " .. name);
+						print("[OUTA]    ", outa);
+						print("[OUTB]    ", outb);
+						print("[SOURCE]", obfuscated);
+						fc = fc + 1;
+					end
 				end
 			end
 		end

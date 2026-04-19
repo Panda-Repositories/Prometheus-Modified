@@ -67,7 +67,7 @@ local function load_chunk(content, chunkName, environment)
 end
 
 -- CLI
-local config, sourceFile, outFile, luaVersion, prettyPrint
+local config, sourceFile, outFile, luaVersion, prettyPrint, compatibilityProfile
 
 Prometheus.colors.enabled = true
 
@@ -112,8 +112,13 @@ while i <= #arg do
 			Prometheus.colors.enabled = false
 		elseif curr == "--Lua51" then
 			luaVersion = "Lua51"
+			compatibilityProfile = "Lua51"
 		elseif curr == "--LuaU" then
 			luaVersion = "LuaU"
+			compatibilityProfile = "LuaU-safe"
+		elseif curr == "--profile" then
+			i = i + 1
+			compatibilityProfile = tostring(arg[i])
 		elseif curr == "--pretty" then
 			prettyPrint = true
 		elseif curr == "--saveerrors" then
@@ -155,6 +160,7 @@ end
 
 -- Add Option to override Lua Version
 config.LuaVersion = luaVersion or config.LuaVersion
+config.CompatibilityProfile = compatibilityProfile or config.CompatibilityProfile
 config.PrettyPrint = prettyPrint ~= nil and prettyPrint or config.PrettyPrint
 
 if not file_exists(sourceFile) then

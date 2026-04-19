@@ -34,6 +34,19 @@ local ASSIGNMENT_NO_WARN_LOOKUP = lookupify{
 	AstKind.VarargExpression
 };
 
+local LUAU_ONLY_SYMBOL_LOOKUP = lookupify{
+	"+=", "-=", "*=", "/=", "%=", "^=", "..=",
+	"::", "->", "?", "|", "&",
+};
+
+local LUAU_TYPED_SYMBOL_LOOKUP = lookupify{
+	":", "::", "->", "?", "|", "&",
+};
+
+local COMPOUND_ASSIGNMENT_SYMBOL_LOOKUP = lookupify{
+	"+=", "-=", "*=", "/=", "%=", "^=", "..=",
+};
+
 local CALLABLE_PREFIX_EXPRESSION_LOOKUP = lookupify{
 	AstKind.VariableExpression,
 	AstKind.IndexExpression,
@@ -59,9 +72,16 @@ local function generateWarning(token, message)
 end
 
 function Parser:new(settings)
-	local luaVersion = (settings and (settings.luaVersion or settings.LuaVersion)) or LuaVersion.LuaU;
+	local luaVersion = (settings and (settings.luaVersion or settings.LuaVersion)) or LuaVersion.Lua51;
+	local featureFlags = (settings and settings.FeatureFlags) or {};
 	local parser = {
 		luaVersion = luaVersion,
+		featureFlags = {
+			AllowContinueStatement = featureFlags.AllowContinueStatement ~= nil and featureFlags.AllowContinueStatement or luaVersion == LuaVersion.LuaU,
+			AllowCompoundAssignment = featureFlags.AllowCompoundAssignment ~= nil and featureFlags.AllowCompoundAssignment or luaVersion == LuaVersion.LuaU,
+			AllowIfElseExpression = featureFlags.AllowIfElseExpression ~= nil and featureFlags.AllowIfElseExpression or luaVersion == LuaVersion.LuaU,
+			AllowTypedSyntax = featureFlags.AllowTypedSyntax == true,
+		},
 		tokenizer = Tokenizer:new({
 			luaVersion = luaVersion
 		}),
@@ -74,6 +94,28 @@ function Parser:new(settings)
 	self.__index = self;
 
 	return parser;
+end
+
+function Parser:checkUnsupportedVersionToken()
+	local tk = self.tokens[self.index + 1] or Tokenizer.EOF_TOKEN;
+	if self.luaVersion == LuaVersion.Lua51 then
+		if tk.kind == TokenKind.Keyword and tk.source == "continue" then
+			logger:error(generateError(self, "Lua51 mode does not support \"continue\". Use LuaU mode or a LuaU compatibility profile."));
+		end
+		if tk.kind == TokenKind.Symbol and LUAU_ONLY_SYMBOL_LOOKUP[tk.source] then
+			logger:error(generateError(self, string.format("Lua51 mode does not support \"%s\" syntax. Use LuaU mode or a LuaU compatibility profile.", tk.source)));
+		end
+	end
+end
+
+function Parser:checkTypedSyntaxAllowed(context)
+	if self.featureFlags.AllowTypedSyntax then
+		return;
+	end
+	local tk = self.tokens[self.index + 1] or Tokenizer.EOF_TOKEN;
+	if tk.kind == TokenKind.Symbol and LUAU_TYPED_SYMBOL_LOOKUP[tk.source] then
+		logger:error(generateError(self, string.format("LuaU typed syntax (%s) is not enabled in this profile%s.", tk.source, context and (" for " .. context) or "")));
+	end
 end
 
 -- Function to peek the n'th token
@@ -182,6 +224,19 @@ function Parser:block(parentScope, currentLoop, scope)
 end
 
 function Parser:statement(scope, currentLoop)
+	self:checkUnsupportedVersionToken();
+	if(not self.featureFlags.AllowTypedSyntax and self.luaVersion == LuaVersion.LuaU) then
+		if is(self, TokenKind.Ident, "type", 0) and is(self, TokenKind.Ident, 1) and is(self, TokenKind.Symbol, "=", 2) then
+			logger:error(generateError(self, "LuaU typed declarations are not enabled in this profile."));
+		end
+		if is(self, TokenKind.Ident, "export", 0) and is(self, TokenKind.Ident, "type", 1) then
+			logger:error(generateError(self, "LuaU typed declarations are not enabled in this profile."));
+		end
+		if is(self, TokenKind.Ident, "declare", 0) then
+			logger:error(generateError(self, "LuaU declaration syntax is not enabled in this profile."));
+		end
+	end
+
 	-- Skip all semicolons before next real statement
 	-- NOP statements are therefore ignored
 	while(consume(self, TokenKind.Symbol, ";")) do
@@ -199,7 +254,7 @@ function Parser:statement(scope, currentLoop)
 	end
 
 	-- Continue Statement - only valid inside of Loops - only valid in LuaU
-	if(self.luaVersion == LuaVersion.LuaU and consume(self, TokenKind.Keyword, "continue")) then
+	if(self.featureFlags.AllowContinueStatement and consume(self, TokenKind.Keyword, "continue")) then
 		if(not currentLoop) then
 			if self.disableLog then error() end;
 			logger:error(generateError(self, "the continue Statement is only valid inside of loops"));
@@ -288,6 +343,7 @@ function Parser:statement(scope, currentLoop)
 		expect(self, TokenKind.Symbol, "(");
 		local args = self:functionArgList(funcScope);
 		expect(self, TokenKind.Symbol, ")");
+		self:checkTypedSyntaxAllowed("function return annotations");
 
 		if(obj.passSelf) then
 			local id = funcScope:addVariable("self", obj.token);
@@ -302,6 +358,7 @@ function Parser:statement(scope, currentLoop)
 
 	-- Local Function or Variable Declaration
 	if(consume(self, TokenKind.Keyword, "local")) then
+		self:checkTypedSyntaxAllowed("local declarations");
 		-- Local Function Declaration
 		if(consume(self, TokenKind.Keyword, "function")) then
 			local ident = expect(self, TokenKind.Ident);
@@ -313,6 +370,7 @@ function Parser:statement(scope, currentLoop)
 			expect(self, TokenKind.Symbol, "(");
 			local args = self:functionArgList(funcScope);
 			expect(self, TokenKind.Symbol, ")");
+			self:checkTypedSyntaxAllowed("function return annotations");
 
 			local body = self:block(nil, false, funcScope);
 			expect(self, TokenKind.Keyword, "end");
@@ -322,6 +380,7 @@ function Parser:statement(scope, currentLoop)
 
 		-- Local Variable Declaration
 		local ids = self:nameList(scope);
+		self:checkTypedSyntaxAllowed("local declarations");
 		local expressions = {};
 		if(consume(self, TokenKind.Symbol, "=")) then
 			expressions = self:exprList(scope);
@@ -408,7 +467,7 @@ function Parser:statement(scope, currentLoop)
 				expr.kind = AstKind.AssignmentVariable
 			end
 
-			if(self.luaVersion == LuaVersion.LuaU) then
+			if(self.featureFlags.AllowCompoundAssignment) then
 				-- LuaU Compound Assignment
 				if(consume(self, TokenKind.Symbol, "+=")) then
 					local rhs = self:expression(scope);
@@ -444,6 +503,8 @@ function Parser:statement(scope, currentLoop)
 					local rhs = self:expression(scope);
 					return Ast.CompoundConcatStatement(expr, rhs);
 				end
+			elseif COMPOUND_ASSIGNMENT_SYMBOL_LOOKUP[(self.tokens[self.index + 1] or Tokenizer.EOF_TOKEN).source] then
+				logger:error(generateError(self, "Compound assignment is not enabled in this profile."));
 			end
 
 			local lhs = {
@@ -715,6 +776,13 @@ end
 function Parser:expressionPow(scope)
 	local lhs = self:tableOrFunctionLiteral(scope);
 
+	if(consume(self, TokenKind.Symbol, "::")) then
+		if not self.featureFlags.AllowTypedSyntax then
+			logger:error(generateError(self, "LuaU type assertions (::) are not enabled in this profile."));
+		end
+		logger:error(generateError(self, "LuaU type assertions (::) are not implemented yet in this parser."));
+	end
+
 	if(consume(self, TokenKind.Symbol, "^")) then
 		-- Allow unary operators on the rhs (e.g. 2 ^ #x, 2 ^ -x) while preserving right-associativity. ~ SpinnySpiwal
 		local rhs = self:expressionUnary(scope);
@@ -746,6 +814,7 @@ function Parser:expressionFunctionLiteral(parentScope)
 	expect(self, TokenKind.Symbol, "(");
 	local args = self:functionArgList(scope);
 	expect(self, TokenKind.Symbol, ")");
+	self:checkTypedSyntaxAllowed("function return annotations");
 
 	local body = self:block(nil, false, scope);
 	expect(self, TokenKind.Keyword, "end");
@@ -763,6 +832,7 @@ function Parser:functionArgList(scope)
 	if(is(self, TokenKind.Ident)) then
 		local ident = get(self);
 		local name = ident.value;
+		self:checkTypedSyntaxAllowed("function arguments");
 
 		local id = scope:addVariable(name, ident);
 		table.insert(args, Ast.VariableExpression(scope, id));
@@ -775,6 +845,7 @@ function Parser:functionArgList(scope)
 
 			ident = get(self);
 			name = ident.value;
+			self:checkTypedSyntaxAllowed("function arguments");
 
 			id = scope:addVariable(name, ident);
 			table.insert(args, Ast.VariableExpression(scope, id));
@@ -941,7 +1012,7 @@ function Parser:expressionLiteral(scope)
 	end
 
 	-- IfElse
-	if(LuaVersion.LuaU) then
+	if(self.featureFlags.AllowIfElseExpression) then
 		if(consume(self, TokenKind.Keyword, "if")) then
 			local condition = self:expression(scope);
 			expect(self, TokenKind.Keyword, "then");

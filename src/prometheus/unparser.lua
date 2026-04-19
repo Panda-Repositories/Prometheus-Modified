@@ -31,7 +31,8 @@ local function escapeString(str)
 end
 
 function Unparser:new(settings)
-	local luaVersion = settings.LuaVersion or LuaVersion.LuaU;
+	settings = settings or {};
+	local luaVersion = settings.LuaVersion or LuaVersion.Lua51;
 	local conventions = Enums.Conventions[luaVersion];
 	local unparser = {
 		luaVersion = luaVersion;
